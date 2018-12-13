@@ -1,4 +1,4 @@
-Attribute VB_Name = "basDatabase"
+Attribute VB_Name = "ExcelAccessRoutines"
 Option Explicit
 
 Const TARGET_DB = "Headcount Test.accdb"
