@@ -1,77 +1,183 @@
 Attribute VB_Name = "ExcelAccessRoutines"
 Option Explicit
 
-Const TARGET_DB = "Headcount Test.accdb"
+'Const TARGET_DB as string= "Excel Access Test.accdb"
+Const TARGET_DB As String = "Headcount with Queries.accdb"
+Const AccountingCalendarTable As String = "AccountingCalendarTable"
+Const ControlAccountTable As String = "ControlAccountTable"
 
-Private pNtwk As WshNetwork                      ' Windows Script Host Object Model library
-Private pDrv As String
-Private pDataBasePath As String
-Private pCnn As ADODB.Connection                 ' Microsoft ActiveX Data Objects 6.1 Library
-Private pLocalFolder As Boolean
+' References:
+' Windows Script Host Object Model library
+'   Used to get the network to create the database
+' Microsoft ActiveX Data Objects 6.1 Library
+'   Brings in ADODB (connections, recordsets, and fields)
+' Microsoft ADO Ext. 6.0 for DDL and Security
+'   Brings in ADOX (catalog, table, index)
+' Microsoft Scripting Runtime
+'   Brings in FileSystemObject
 
-Public Sub TransferTableFromAccess()
-    
-    Dim ShDest As Worksheet
-    Set ShDest = Sheets("Table download")
+Private Type NetworkDataType
+    Drv As String
+    NtWk As WshNetwork
+    LocalFolder As Boolean
+    DataBasePath As String
+    Cnn As ADODB.Connection
+    Cat As ADOX.Catalog
+    Initialized As Boolean
+End Type
 
-    Set pCnn = New ADODB.Connection
+Private pNetworkData As NetworkDataType
+
+Public Sub test()
+    Initialize
+    MsgBox GetHoursByCompanyAndDateRange("LM", #11/1/2018#, #12/31/2018#)
+    MsgBox GetHoursByCompanyAndDateRangeAndPeriod("LM", #11/1/2018#, #12/31/2018#, "OY3")
+    MsgBox GetHoursByCompanyAndDateRangeAndPeriod("LM", #11/1/2018#, #12/31/2018#, "OY4")
+
+    MsgBox GetCompanyFromControlAccount("8G3SN04311-03")
+    Wrapup
+End Sub                                          ' test
+
+Public Function GetCompanyFromControlAccount(ByVal CtlAcct As String) As String
+
+    Dim SQLQuery As String
+    SQLQuery = "SELECT AccountingCalendar AS CompanyName " & _
+               "FROM " & ControlAccountTable & " " & _
+               "WHERE " & ControlAccountTable & ".ControlAccount = """ & _
+               CtlAcct & """;"
     
-    Dim MyConn As String
-    MyConn = ThisWorkbook.Path & Application.PathSeparator & TARGET_DB
+    Dim rst As ADODB.Recordset
+    GetCompanyFromControlAccount = GetStringFromDatabase(SQLQuery)
     
-    With pCnn
-        .Provider = "Microsoft.ACE.OLEDB.12.0"
-        .Open MyConn
-    End With
+End Function                                     ' GetCompanyFromControlAccount
+
+Private Function GetStringFromDatabase(ByVal SQLString As String) As String
 
     Dim rst As ADODB.Recordset
     Set rst = New ADODB.Recordset
     rst.CursorLocation = adUseServer
-    rst.Open Source:="tblPopulation", _
-             ActiveConnection:=pCnn, _
+    rst.Open Source:=SQLString, _
+             ActiveConnection:=pNetworkData.Cnn, _
              CursorType:=adOpenDynamic, _
-             LockType:=adLockOptimistic, _
-             Options:=adCmdTable
+             LockType:=adLockOptimistic
     
-    'clear existing data on the sheet
-    ShDest.Activate
-    Range("A1").CurrentRegion.Offset(1, 0).Clear
+    GetStringFromDatabase = rst.Fields(0)
     
-    'create field headers
-    Dim I As Long
-    I = 0
-    Dim fld As ADODB.Field
-    With Range("A1")
-        For Each fld In rst.Fields
-            .Offset(0, I).Value = fld.Name
-            I = I + 1
-        Next fld
-    End With
-     
-    'transfer data to Excel
-    Range("A2").CopyFromRecordset rst
-    
-    ' Close the connection
-    rst.Close
-    pCnn.Close
-    Set rst = Nothing
-    Set pCnn = Nothing
+End Function                                     ' GetStringFromDatabase
 
-End Sub
+Private Function GetLongFromDatabase(ByVal SQLString As String) As Long
+
+    Dim rst As ADODB.Recordset
+    Set rst = New ADODB.Recordset
+    rst.CursorLocation = adUseServer
+    rst.Open Source:=SQLString, _
+             ActiveConnection:=pNetworkData.Cnn, _
+             CursorType:=adOpenDynamic, _
+             LockType:=adLockOptimistic
+    
+    GetLongFromDatabase = rst.Fields(0)
+    
+End Function                                     ' GetLongFromDatabase
+
+Private Function GetSingleFromDatabase(ByVal SQLString As String) As Single
+
+    Dim rst As ADODB.Recordset
+    Set rst = New ADODB.Recordset
+    rst.CursorLocation = adUseServer
+    rst.Open Source:=SQLString, _
+             ActiveConnection:=pNetworkData.Cnn, _
+             CursorType:=adOpenDynamic, _
+             LockType:=adLockOptimistic
+    
+    GetSingleFromDatabase = rst.Fields(0)
+    
+End Function                                     ' GetSingleFromDatabase
+
+Public Function GetHoursByCompanyAndDateRange( _
+       ByVal Company As String, _
+       ByVal StartDate As Variant, _
+       ByVal EndDate As Variant) _
+        As Single
+
+    Dim SD As String
+    SD = VariantToDateString(StartDate)
+    
+    Dim ED As String
+    ED = VariantToDateString(EndDate)
+    
+    Dim SQLQuery As String
+    SQLQuery = "SELECT Sum(" & AccountingCalendarTable & "." & _
+               Company & "Hours) as Hours " & _
+               "FROM " & AccountingCalendarTable & " " & _
+               "WHERE " & AccountingCalendarTable & ".Date " & _
+               "Between DateValue(""" & SD & """) And DateValue(""" & ED & """);"
+    
+    Dim rst As ADODB.Recordset
+    GetHoursByCompanyAndDateRange = GetLongFromDatabase(SQLQuery)
+    
+End Function                                     ' GetHoursByCompanyAndDateRange
+
+Public Function GetHoursByCompanyAndDateRangeAndPeriod( _
+       ByVal Company As String, _
+       ByVal StartDate As Variant, _
+       ByVal EndDate As Variant, _
+       ByVal Period As String) _
+        As Single
+
+    Dim SD As String
+    SD = VariantToDateString(StartDate)
+    
+    Dim ED As String
+    ED = VariantToDateString(EndDate)
+    
+    Dim SQLQuery As String
+    SQLQuery = "SELECT Sum(" & AccountingCalendarTable & "." & _
+               Company & "Hours) as Hours " & _
+               "FROM " & AccountingCalendarTable & " " & _
+               "WHERE " & AccountingCalendarTable & ".Date " & _
+               "Between DateValue(""" & SD & """) And DateValue(""" & ED & """) " & _
+               "AND " & AccountingCalendarTable & "." & Period & "=1;"
+    
+    Dim rst As ADODB.Recordset
+    GetHoursByCompanyAndDateRangeAndPeriod = GetSingleFromDatabase(SQLQuery)
+    
+End Function                                     ' GetHoursByCompanyAndDateRangeAndPeriod
+
+Private Function VariantToDateString(ByVal InputDate As Variant) As String
+    Select Case VarType(InputDate)
+    Case vbString
+        VariantToDateString = InputDate
+    Case vbLong, vbDate, vbInteger
+        ' Convert to string
+        VariantToDateString = Format$(InputDate, "mm/dd/yyyy")
+    Case Else
+        MsgBox "Unknown data type passed to VariantToDateString." & _
+               vbCrLf & _
+               "Update the Select Case statement", _
+               vbOKOnly Or vbCritical, _
+               "Unknown Data Type"
+    End Select
+End Function                                     ' VariantToDateString
 
 Public Sub PushTablesToAccess()
 
-    Dim Wksht As Worksheet
-    Set pCnn = New ADODB.Connection
-    
-    Dim MyConn As String
-    MyConn = ThisWorkbook.Path & Application.PathSeparator & TARGET_DB
-    
-    With pCnn
-        .Provider = "Microsoft.ACE.OLEDB.12.0"
-        .Open MyConn
-    End With
+    Dim Response As String
+    Response = MsgBox("Are you sure you want to overwrite the entire database?" & _
+                      vbCrLf & _
+                      "(" & TARGET_DB & ")", _
+                      vbYesNo Or vbExclamation, _
+                      "Overwrite Database?")
+    Select Case Response
+    Case vbYes
+        ' Press on
+    Case vbNo
+        Exit Sub
+    End Select
 
+    Initialize
+
+    Dim Wksht As Worksheet
+    
     For Each Wksht In ActiveWorkbook.Worksheets
         Dim Tbl As ListObject
         For Each Tbl In Wksht.ListObjects
@@ -79,10 +185,13 @@ Public Sub PushTablesToAccess()
             Set rst = New ADODB.Recordset
             rst.CursorLocation = adUseServer
             rst.Open Source:=Tbl.Name, _
-                     ActiveConnection:=pCnn, _
+                     ActiveConnection:=pNetworkData.Cnn, _
                      CursorType:=adOpenDynamic, _
                      LockType:=adLockOptimistic, _
                      Options:=adCmdTable
+            
+            ' Clear the Access table before loading records
+            pNetworkData.Cnn.Execute "DELETE * FROM " & Tbl.Name & ";"
             
             'Load all records from Excel to Access
             Dim I As Long
@@ -91,7 +200,18 @@ Public Sub PushTablesToAccess()
                 rst.AddNew
                 For J = 1 To Tbl.ListColumns.Count
                     If Tbl.DataBodyRange(I, J) = vbEmpty Then
-                        rst(Tbl.HeaderRowRange(1, J).Value) = vbNullString
+                        Dim FieldName As String
+                        FieldName = Tbl.HeaderRowRange(1, J)
+                        Select Case rst.Fields(FieldName).Type
+                        Case adDate
+                            rst(Tbl.HeaderRowRange(1, J).Value) = 0
+                        Case adLongVarWChar, adVarWChar
+                            rst(Tbl.HeaderRowRange(1, J).Value) = vbNullString
+                        Case adDouble
+                            rst(Tbl.HeaderRowRange(1, J).Value) = 0
+                        Case Else
+                            Stop
+                        End Select
                     Else
                         On Error Resume Next
                         rst(Tbl.HeaderRowRange(1, J).Value) = Tbl.DataBodyRange(I, J)
@@ -117,369 +237,47 @@ Public Sub PushTablesToAccess()
         Next Tbl
     Next Wksht
     
-    ' Close the connection
-    pCnn.Close
-    Set pCnn = Nothing
+    Wrapup
 
-End Sub
+End Sub                                          ' PushTablesToAccess
 
 Public Sub CreateDB_And_Tables()
+
+    Initialize
     
     DeleteOldAndCreateNewDatabase
     
     'create the new database
-    Dim Cat As ADOX.Catalog                      ' Microsoft ADO Ext. 6.0 for DDL and Security
-    Set Cat = New ADOX.Catalog
+    Set pNetworkData.Cat = New ADOX.Catalog
     
     Dim CatString As String
-    CatString = "Provider=Microsoft.ACE.OLEDB.12.0;" & "Data Source=" & pDataBasePath & ";"
+    CatString = "Provider=Microsoft.ACE.OLEDB.12.0;" & "Data Source=" & pNetworkData.DataBasePath & ";"
     
-    Cat.Create CatString
+    pNetworkData.Cat.Create CatString
         
     Dim Wksht As Worksheet
     For Each Wksht In ThisWorkbook.Worksheets
-        ' todo: deal with multiple tables on one worksheet
         Dim Tbl As ListObject
         For Each Tbl In Wksht.ListObjects
-            CreateOneTable Tbl, Cat
+            CreateOneTable Tbl
         Next Tbl
         
     Next Wksht
     
-    UnMapDrive pDrv, pNtwk
+    Wrapup
     
-End Sub
-
-Public Sub AlterOneRecord()
-    
-    Dim RowNum As Long
-    RowNum = ActiveCell.Row
-    
-    Dim ColNum As Long
-    ColNum = Cells(RowNum, 1).Value
-    
-    Dim SQLQuery As String
-    SQLQuery = "SELECT * FROM tblPopulation WHERE PopID = " & ColNum
-    
-    Set pCnn = New ADODB.Connection
-    
-    Dim MyConn As String
-    MyConn = ThisWorkbook.Path & Application.PathSeparator & TARGET_DB
-    
-    With pCnn
-        .Provider = "Microsoft.ACE.OLEDB.12.0"
-        .Open MyConn
-    End With
-
-    Dim rst As ADODB.Recordset
-    Set rst = New ADODB.Recordset
-    rst.CursorLocation = adUseServer
-    rst.Open Source:=SQLQuery, _
-             ActiveConnection:=pCnn, _
-             CursorType:=adOpenKeyset, _
-             LockType:=adLockOptimistic
-    
-    'Load all records from Excel to Access.
-    Dim I As Long
-    For I = 2 To 7
-        rst(Cells(1, I).Value) = Cells(RowNum, I).Value
-    Next I
-    rst.Update
-    
-    ' Close the connection
-    rst.Close
-    pCnn.Close
-    Set rst = Nothing
-    Set pCnn = Nothing
-    
-End Sub
-
-Public Sub DownloadTop20()
-    
-    Dim ShDest As Worksheet
-    Set ShDest = Sheets("Top 20")
-
-    Dim SQLQuery As String
-    SQLQuery = "SELECT TOP 20 * FROM tblPopulation ORDER BY Yr_2050 DESC"
-
-    Set pCnn = New ADODB.Connection
-    
-    Dim MyConn As String
-    MyConn = ThisWorkbook.Path & Application.PathSeparator & TARGET_DB
-    
-    With pCnn
-        .Provider = "Microsoft.ACE.OLEDB.12.0"
-        .Open MyConn
-    End With
-
-    Dim rst As ADODB.Recordset
-    Set rst = New ADODB.Recordset
-    rst.CursorLocation = adUseServer
-    rst.Open Source:=SQLQuery, _
-             ActiveConnection:=pCnn, _
-             CursorType:=adOpenForwardOnly, _
-             LockType:=adLockOptimistic, _
-             Options:=adCmdText
-    
-    'clear existing data on the sheet
-    ShDest.Activate
-    Range("A1").CurrentRegion.Offset(1, 0).Clear
-    
-    'create field headers
-    Dim I As Long
-    I = 0
-    Dim fld As ADODB.Field
-    With Range("A1")
-        For Each fld In rst.Fields
-            .Offset(0, I).Value = fld.Name
-            I = I + 1
-        Next fld
-    End With
-     
-    'transfer data to Excel
-    Range("A2").CopyFromRecordset rst
-    
-    ' Close the connection
-    rst.Close
-    pCnn.Close
-    Set rst = Nothing
-    Set pCnn = Nothing
-
-End Sub
-
-Public Sub DownloadRegion()
-    
-    Dim ShDest As Worksheet
-    Set ShDest = Sheets("Region")
-
-    Dim SQLQuery As String
-    SQLQuery = "SELECT * FROM tblPopulation WHERE Region ='" & Range("PickCountry").Value & "'"
-
-    Set pCnn = New ADODB.Connection
-    
-    Dim MyConn As String
-    MyConn = ThisWorkbook.Path & Application.PathSeparator & TARGET_DB
-    
-    With pCnn
-        .Provider = "Microsoft.ACE.OLEDB.12.0"
-        .Open MyConn
-    End With
-
-    Dim rst As ADODB.Recordset
-    Set rst = New ADODB.Recordset
-    rst.CursorLocation = adUseServer
-    rst.Open Source:=SQLQuery, _
-             ActiveConnection:=pCnn, _
-             CursorType:=adOpenForwardOnly, _
-             LockType:=adLockOptimistic, _
-             Options:=adCmdText
-    
-    'clear existing data on the sheet
-    ShDest.Activate
-    Range("A1").CurrentRegion.Clear
-    
-    'create field headers
-    Dim I As Long
-    I = 0
-    Dim fld As ADODB.Field
-    With Range("A1")
-        For Each fld In rst.Fields
-            .Offset(0, I).Value = fld.Name
-            I = I + 1
-        Next fld
-    End With
-     
-    'transfer data to Excel
-    Range("A2").CopyFromRecordset rst
-    
-    ' Close the connection
-    rst.Close
-    pCnn.Close
-    Set rst = Nothing
-    Set pCnn = Nothing
-
-End Sub
-
-Public Sub DownloadMultiChoice()
-    
-    Dim ShDest As Worksheet
-    Set ShDest = Sheets("Region")
-    
-    On Error GoTo Err_Handle
-        
-    'If you got this far the user has made a selection. Proceed with filtering
-    Dim ListOfSelections As String
-    Dim arChoice() As Variant
-    If Range("MultiPick").Cells.Count = 1 Then
-        ListOfSelections = "='" & Range("MultiPick").Value & "'"
-    Else
-        arChoice = WorksheetFunction.Transpose(Range("MultiPick"))
-        ListOfSelections = "IN('" & Join(arChoice, "','") & "')"
-    End If
-    
-    'if the items are numbers instead of text, omit the single quotes --
-    'ListOfSelections = "IN(" & Join(arChoice, ",") & ")"
-        
-    Dim SQLQuery As String
-    SQLQuery = "SELECT * FROM tblPopulation WHERE Region " & ListOfSelections
-    Debug.Print SQLQuery
-    
-    Set pCnn = New ADODB.Connection
-    
-    Dim MyConn As String
-    MyConn = ThisWorkbook.Path & Application.PathSeparator & TARGET_DB
-    
-    With pCnn
-        .Provider = "Microsoft.ACE.OLEDB.12.0"
-        .Open MyConn
-    End With
-
-    Dim rst As ADODB.Recordset
-    Set rst = New ADODB.Recordset
-    rst.CursorLocation = adUseServer
-    rst.Open Source:=SQLQuery, _
-             ActiveConnection:=pCnn, _
-             CursorType:=adOpenForwardOnly, _
-             LockType:=adLockOptimistic, _
-             Options:=adCmdText
-    
-    'clear existing data on the sheet
-    Range("A1").CurrentRegion.Clear
-    
-    'create field headers
-    Dim I As Long
-    I = 0
-    Dim fld As ADODB.Field
-    With Range("A1")
-        For Each fld In rst.Fields
-            .Offset(0, I).Value = fld.Name
-            I = I + 1
-        Next fld
-    End With
-    
-    'transfer data to Excel
-    Range("A2").CopyFromRecordset rst
-    
-    ' Close the connection
-    rst.Close
-    pCnn.Close
-    Set rst = Nothing
-    Set pCnn = Nothing
-    
-Err_Exit:
-    Exit Sub
-    
-Err_Handle:
-    Select Case Err.Number
-    Case 1004                                    'range not found; no items in list
-        MsgBox "Please select at least one choice"
-        Range("M2").Select
-        Resume Err_Exit
-    Case Else
-        MsgBox "Error " & Err.Number & ": " & Err.Description
-    End Select
-End Sub
-
-Public Sub AddNewField()
-  
-    Set pCnn = New ADODB.Connection
-    
-    Dim MyConn As String
-    MyConn = ThisWorkbook.Path & Application.PathSeparator & TARGET_DB
-  
-    'open the connection
-    Set pCnn = New ADODB.Connection
-    With pCnn
-        .Provider = "Microsoft.ACE.OLEDB.12.0"
-        .Open MyConn
-    End With
-    
-    Dim cmd As ADODB.Command
-    Set cmd = New ADODB.Command
-    Set cmd.ActiveConnection = pCnn
-    'create the field
-    cmd.CommandText = "ALTER TABLE tblPopulation ADD Column Region Char(30)"
-    cmd.Execute
-    Set cmd = Nothing
-    pCnn.Close
-    Set pCnn = Nothing
-End Sub
-
-Public Sub PopulateOneField()
-
-    Sheets("New Field").Activate
-    Dim Rw As Long
-    Rw = Range("A65536").End(xlUp).Row
-
-    Set pCnn = New ADODB.Connection
-    
-    Dim MyConn As String
-    MyConn = ThisWorkbook.Path & Application.PathSeparator & TARGET_DB
-    
-    With pCnn
-        .Provider = "Microsoft.ACE.OLEDB.12.0"
-        .Open MyConn
-    End With
-
-    Dim rst As ADODB.Recordset
-    Set rst = New ADODB.Recordset
-    rst.CursorLocation = adUseServer
-    'Update one field in all records of the table
-    Dim I As Long
-    Dim SQLQuery As String
-    For I = 2 To Rw
-        SQLQuery = "SELECT * FROM tblPopulation WHERE PopID = " & Cells(I, 1).Value
-        rst.Open Source:=SQLQuery, _
-                 ActiveConnection:=pCnn, _
-                 CursorType:=adOpenKeyset, _
-                 LockType:=adLockOptimistic
-        rst(Cells(1, 3).Value) = Cells(I, 3).Value
-        rst.Update
-        rst.Close
-    Next I
-    
-    ' Close the connection
-    pCnn.Close
-    Set rst = Nothing
-    Set pCnn = Nothing
-
-End Sub
-
-Private Sub DeleteAField()
-    
-    Set pCnn = New ADODB.Connection
-    
-    Dim MyConn As String
-    MyConn = ThisWorkbook.Path & Application.PathSeparator & TARGET_DB
-  
-    'open the connection
-    Set pCnn = New ADODB.Connection
-    With pCnn
-        .Provider = "Microsoft.ACE.OLEDB.12.0"
-        .Open MyConn
-    End With
-    
-    Dim cmd As ADODB.Command
-    Set cmd = New ADODB.Command
-    Set cmd.ActiveConnection = pCnn
-    'create the field
-    cmd.CommandText = "ALTER TABLE tblPopulation DROP Column Region"
-    cmd.Execute
-    Set cmd = Nothing
-    pCnn.Close
-    Set pCnn = Nothing
-End Sub
+End Sub                                          ' CreateDB_And_Tables
 
 Public Function MapDrive( _
        ByVal Folder As String, _
-       ByVal Ntwk As Object) As String
+       ByVal NtWk As Object) As String
        
     Dim I As Long
     Dim Drive As String
 
     For I = Asc("A") To Asc("Z")
         Drive = Chr$(I) & ":"
-        If TestDrive(Drive, Folder, Ntwk) Then
+        If TestDrive(Drive, Folder, NtWk) Then
             MapDrive = Drive
             Exit Function
         End If
@@ -490,102 +288,79 @@ Public Function MapDrive( _
 End Function                                     ' MapDrive
 
 Private Function TestDrive(ByVal Drive As String, _
-                           ByVal Folder As String, ByVal Ntwk As Object) As Boolean
+                           ByVal Folder As String, ByVal NtWk As Object) As Boolean
     On Error GoTo FailedToMap
-    Ntwk.MapNetworkDrive Drive, Folder
+    NtWk.MapNetworkDrive Drive, Folder
     TestDrive = True
     Exit Function
 FailedToMap:
     TestDrive = False
 End Function                                     ' TestDrive
 
-Private Sub UnMapDrive( _
-        ByVal Drive As String, _
-        ByRef Ntwk As Object)
+Private Sub UnMapDrive(ByRef NetworkData As NetworkDataType)
     
-    If pLocalFolder Then Exit Sub
+    If NetworkData.LocalFolder Then Exit Sub
     
     On Error Resume Next
-    If Drive <> "Failed" Then
-        Ntwk.RemoveNetworkDrive Drive
+    If NetworkData.Drv <> "Failed" Then
+        NetworkData.NtWk.RemoveNetworkDrive NetworkData.Drv
     End If
     On Error GoTo 0
-    Set Ntwk = Nothing
+    Set NetworkData.NtWk = Nothing
 End Sub                                          ' UnMapDrive
 
-Private Sub CreatePrimaryKey( _
-        ByVal TableName As String, _
-        ByVal KeyColumn As Variant)
+Private Sub InitializeNetwork()
+
+    Set pNetworkData.NtWk = New WshNetwork
     
-    Set pCnn = New ADODB.Connection
+    pNetworkData.DataBasePath = ThisWorkbook.Path & Application.PathSeparator & TARGET_DB
     
-    With pCnn
+    If Mid$(pNetworkData.DataBasePath, 2, 1) = ":" Then
+        pNetworkData.Drv = Left$(pNetworkData.DataBasePath, 2)
+        pNetworkData.LocalFolder = True
+    Else
+        pNetworkData.Drv = MapDrive(pNetworkData.DataBasePath, pNetworkData.NtWk)
+        pNetworkData.LocalFolder = False
+    End If
+
+End Sub                                          ' InitializeNetwork
+
+Private Sub OpenDataBase()
+
+    Set pNetworkData.Cnn = New ADODB.Connection
+    
+    With pNetworkData.Cnn
         .Provider = "Microsoft.ACE.OLEDB.12.0"
-        .Open pDataBasePath
+        .Open pNetworkData.DataBasePath
     End With
-    
-    'create the catalog
-    Dim Cat As ADOX.Catalog
-    Set Cat = New ADOX.Catalog
-    Cat.ActiveConnection = pCnn
-    
-    Dim Tbl As ADOX.Table
-    Set Tbl = Cat.Tables(TableName)
-    
-    'delete any existing primary keys
-    Dim idx As ADOX.Index
-    For Each idx In Tbl.Indexes
-        If idx.PrimaryKey Then
-            Tbl.Indexes.Delete idx.Name
-        End If
-    Next idx
-    
-    'create a new primary key
-    Set idx = New ADOX.Index
-    With idx
-        .PrimaryKey = True
-        .Name = "PrimaryKey"
-        .Unique = True
-    End With
-    
-    'append the column
-    idx.Columns.Append KeyColumn
-    
-    'append the index to the collection
-    Tbl.Indexes.Append idx
-    Tbl.Indexes.Refresh
-    
-    'clean up references
-    Set pCnn = Nothing
-    Set Cat = Nothing
-    Set Tbl = Nothing
-    Set idx = Nothing
-    
-End Sub
+
+End Sub                                          ' OpenDataBase
 
 Private Sub DeleteOldAndCreateNewDatabase()
 
-    Set pNtwk = New WshNetwork
-    
     Dim FS As FileSystemObject
-    Set FS = New FileSystemObject                ' Microsoft Scripting Runtime
+    Set FS = New FileSystemObject
     
-    If Mid$(ThisWorkbook.Path, 2, 1) = ":" Then
-        pDrv = ThisWorkbook.Path
-        pLocalFolder = True
-    Else
-        pDrv = MapDrive(ThisWorkbook.Path, pNtwk)
-        pLocalFolder = False
-    End If
-    
-    pDataBasePath = pDrv & Application.PathSeparator & TARGET_DB
+    Dim Response As String
+    Response = MsgBox("Are you sure you want to delete the database?" & _
+                      vbCrLf & _
+                      "(" & TARGET_DB & ")", _
+                      vbYesNo Or vbExclamation, _
+                      "Delete Database?")
+    Select Case Response
+    Case vbYes
+        ' Press on
+    Case vbNo
+        Exit Sub
+    End Select
     
     'delete the DB if it already exists
     Dim ErrorNumber As Long
     On Error Resume Next
-    Kill pDataBasePath
+    Kill pNetworkData.DataBasePath
     ErrorNumber = Err.Number
     On Error GoTo 0
+    
     Select Case ErrorNumber
     Case 0
         ' Indicates database was successfully deleted
@@ -605,9 +380,7 @@ Private Sub DeleteOldAndCreateNewDatabase()
     
 End Sub                                          ' DeleteOldAndCreateNewDatabase
 
-Private Sub CreateOneTable( _
-        ByVal Tbl As ListObject, _
-        ByVal Cat As ADOX.Catalog)
+Private Sub CreateOneTable(ByVal Tbl As ListObject)
 
     Dim AccessTable As ADOX.Table
     Set AccessTable = New ADOX.Table
@@ -623,7 +396,11 @@ Private Sub CreateOneTable( _
         Case vbString, vbEmpty
             Dim MaxLength As Long
             MaxLength = FindMaxFieldLength(Tbl, I)
-            AccessTable.Columns.Append FieldName, adVarWChar, MaxLength
+            If MaxLength <= 255 Then
+                AccessTable.Columns.Append FieldName, adVarWChar, MaxLength
+            Else
+                AccessTable.Columns.Append FieldName, adLongVarWChar, MaxLength
+            End If
         Case vbInteger, vbLong
             AccessTable.Columns.Append FieldName, adInteger
         Case vbSingle, vbDouble
@@ -638,9 +415,9 @@ Private Sub CreateOneTable( _
         End Select
     Next I
         
-    Cat.Tables.Append AccessTable
+    pNetworkData.Cat.Tables.Append AccessTable
         
-End Sub
+End Sub                                          ' CreateOneTable
 
 Private Function FindMaxFieldLength( _
         ByVal Tbl As ListObject, _
@@ -668,6 +445,33 @@ Private Function FindMaxFieldLength( _
     
     FindMaxFieldLength = MaxFieldLength
     
-End Function
+End Function                                     ' FindMaxFieldLength
+
+Private Sub Initialize()
+
+    If pNetworkData.Initialized Then Exit Sub
+
+    InitializeNetwork
+    
+    OpenDataBase
+    
+    pNetworkData.Initialized = True
+    
+End Sub                                          ' Initialize
+
+Private Sub Wrapup()
+
+    If Not pNetworkData.Initialized Then Exit Sub
+
+    pNetworkData.Cnn.Close
+    Set pNetworkData.Cnn = Nothing
+    
+    UnMapDrive pNetworkData
+    
+    Set pNetworkData.Cat = Nothing
+    
+    pNetworkData.Initialized = False
+
+End Sub                                          ' Wrapup
 
 
